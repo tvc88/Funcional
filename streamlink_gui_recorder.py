@@ -11,7 +11,7 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 
 from utils import sanitize, human_size, human_time, is_live, convert_ts
-from recorder import Recorder, EXEC_CONV
+from recorder import Recorder, EXEC_CONV, HLSRecoveryConfig
 from config import load_config, save_config
 from telegram_utils import enviar_notificacao_telegram, update_creds
 
@@ -76,6 +76,7 @@ class MainWindow(QMainWindow):
         self.output_dir_manual.mkdir(parents=True, exist_ok=True)
         self.output_dir_monitor.mkdir(parents=True, exist_ok=True)
 
+        self.hls_recovery_cfg = {}
         self.recorder = Recorder()
         self.manual_last_size, self.manual_inact = {}, {}
         self.auto_last_size,   self.auto_inact   = {}, {}
@@ -450,7 +451,9 @@ class MainWindow(QMainWindow):
             self._loaded_monitored,
             self.telegram_token,
             self.telegram_chat_id,
+            self.hls_recovery_cfg,
         ) = load_config(CONFIG_FILE)
+        self.recorder = Recorder(HLSRecoveryConfig(**self.hls_recovery_cfg))
         self.output_dir_manual.mkdir(parents=True, exist_ok=True)
         self.output_dir_monitor.mkdir(parents=True, exist_ok=True)
 
@@ -706,6 +709,7 @@ class MainWindow(QMainWindow):
                 data,
                 self.telegram_token,
                 self.telegram_chat_id,
+                self.hls_recovery_cfg,
             )
         except Exception as e:
             self._mon_log(f"Erro ao salvar configuração: {e}")
@@ -714,7 +718,7 @@ class MainWindow(QMainWindow):
     def _load_monitored(self):
         mon_list = getattr(self, "_loaded_monitored", None)
         if mon_list is None:
-            _, _, mon_list, self.telegram_token, self.telegram_chat_id = load_config(CONFIG_FILE)
+            _, _, mon_list, self.telegram_token, self.telegram_chat_id, self.hls_recovery_cfg = load_config(CONFIG_FILE)
         if mon_list:
             try:
                 for ch in mon_list:
@@ -756,6 +760,7 @@ class MainWindow(QMainWindow):
                 ],
                 self.telegram_token,
                 self.telegram_chat_id,
+                self.hls_recovery_cfg,
             )
             update_creds(self.telegram_token, self.telegram_chat_id)
             QMessageBox.information(self, "Telegram", "Credenciais salvas com sucesso.")
