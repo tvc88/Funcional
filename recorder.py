@@ -19,6 +19,40 @@ class Recorder:
         self.astart = {}
         self.ats = {}
 
+    def _start_streamlink_with_fallback(self, url: str, qual: str, ts: Path):
+        """Inicia o streamlink e tenta fallback para 'best' quando necessário."""
+        qualities = [qual]
+        if qual != "best":
+            qualities.append("best")
+
+        last_return_code = None
+        last_quality = qual
+        for q in qualities:
+            p = subprocess.Popen(
+                ["streamlink", url, q, "-o", str(ts), "--retry-streams", "5"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            # aguarda brevemente para checar falha imediata do streamlink
+            try:
+                p.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                return p, q
+
+            if p.poll() is None:
+                return p, q
+
+            if p.returncode == 0:
+                return p, q
+
+            last_return_code = p.returncode
+            last_quality = q
+
+        raise RuntimeError(
+            f"streamlink encerrou com código {last_return_code} ao iniciar (qualidade: {last_quality})"
+        )
+
     # Manual recording
     def start_manual(self, key: str, label: str, url: str, qual: str, output_dir: Path) -> Path:
         # Ajusta URLs de canal do YouTube para apontarem diretamente para o video ao vivo
@@ -27,22 +61,7 @@ class Recorder:
         subdir = output_dir / sanitize(label)
         subdir.mkdir(parents=True, exist_ok=True)
         ts = subdir / f"{datetime.now():%d%m%y_%H%M}.ts"
-        p = subprocess.Popen(
-            ["streamlink", url, qual, "-o", str(ts), "--retry-streams", "5"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-
-        # aguarda brevemente para checar falha imediata do streamlink
-        try:
-            p.wait(timeout=1)
-        except subprocess.TimeoutExpired:
-            pass
-
-        if p.poll() is not None and p.returncode != 0:
-            raise RuntimeError(
-                f"streamlink encerrou com código {p.returncode} ao iniciar"
-            )
+        p, _used_quality = self._start_streamlink_with_fallback(url, qual, ts)
 
         self.proc[key] = p
         self.start[key] = time.time()
@@ -76,6 +95,7 @@ class Recorder:
         subdir = output_dir / sanitize(name)
         subdir.mkdir(parents=True, exist_ok=True)
         ts = subdir / f"{datetime.now():%d%m%y_%H%M}.ts"
+        p, _used_quality = self._start_streamlink_with_fallback(url, qual, ts)
         p = subprocess.Popen(
             ["streamlink", url, qual, "-o", str(ts), "--retry-streams", "5"],
             stdout=subprocess.DEVNULL,

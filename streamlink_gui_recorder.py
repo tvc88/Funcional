@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 
-from utils import sanitize, human_size, human_time, is_live
+from utils import sanitize, human_size, human_time, is_live, convert_ts
 from recorder import Recorder, EXEC_CONV
 from config import load_config, save_config
 from telegram_utils import enviar_notificacao_telegram, update_creds
@@ -788,6 +788,14 @@ class MainWindow(QMainWindow):
     def _handle_manual_process_stop(self, item, iid, return_code):
         ts_file = self.recorder.ts.get(iid)
         size = ts_file.stat().st_size if ts_file and ts_file.exists() else 0
+        if return_code == 0 and size > 0 and ts_file:
+            item.setText(3, "Convertendo…")
+            self._manual_log(
+                f"ℹ️ streamlink encerrou para {item.text(0)}; iniciando conversão automática."
+            )
+            fut = EXEC_CONV.submit(convert_ts, ts_file)
+            fut.add_done_callback(lambda f, k=iid, it=item: self._finish_manual(f, it, k))
+            return
         item.setText(3, "Falhou")
         item.setText(4, f"Processo finalizado ({return_code})")
         self._manual_log(
@@ -808,6 +816,14 @@ class MainWindow(QMainWindow):
     def _handle_auto_process_stop(self, ch, cid, return_code):
         ts_file = self.recorder.ats.get(cid)
         size = ts_file.stat().st_size if ts_file and ts_file.exists() else 0
+        if return_code == 0 and size > 0 and ts_file:
+            ch.setText(4, "Convertendo…")
+            self._mon_log(
+                f"ℹ️ streamlink encerrou para {ch.text(2)}; iniciando conversão automática."
+            )
+            fut = EXEC_CONV.submit(convert_ts, ts_file)
+            fut.add_done_callback(lambda f, c=cid, it=ch: self._finish_auto(f, it, c))
+            return
         ch.setText(4, "offline (aguardando)")
         ch.setText(5, f"Processo finalizado ({return_code})")
         self._mon_log(
