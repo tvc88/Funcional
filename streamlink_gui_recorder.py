@@ -742,7 +742,11 @@ class MainWindow(QMainWindow):
         for i in range(self.order_tree.topLevelItemCount()):
             it = self.order_tree.topLevelItem(i); iid = self._item_key(it)
             proc = self.recorder.proc.get(iid)
-            if not proc or proc.poll() is not None: continue
+            if not proc:
+                continue
+            if proc.poll() is not None:
+                self._handle_manual_process_stop(it, iid, proc.returncode)
+                continue
             if not self.recorder.ts[iid].exists(): continue
             size = self.recorder.ts[iid].stat().st_size
             size_str = human_size(size)
@@ -761,7 +765,11 @@ class MainWindow(QMainWindow):
         # ---- AUTOMÁTICO ----
         for ch in self._iter_mon():
             cid = self._item_key(ch); proc = self.recorder.aproc.get(cid)
-            if not proc or proc.poll() is not None: continue
+            if not proc:
+                continue
+            if proc.poll() is not None:
+                self._handle_auto_process_stop(ch, cid, proc.returncode)
+                continue
             if not self.recorder.ats[cid].exists(): continue
             size = self.recorder.ats[cid].stat().st_size
             size_str = human_size(size)
@@ -776,6 +784,46 @@ class MainWindow(QMainWindow):
             if self.auto_inact[cid] >= WATCHDOG_MAX:
                 self._mon_log(f"Watchdog: encerrando {ch.text(2)} por inatividade.")
                 self.recorder.stop_auto(cid, lambda fut, c=cid, it=ch: self._finish_auto(fut, it, c))
+
+    def _handle_manual_process_stop(self, item, iid, return_code):
+        ts_file = self.recorder.ts.get(iid)
+        size = ts_file.stat().st_size if ts_file and ts_file.exists() else 0
+        item.setText(3, "Falhou")
+        item.setText(4, f"Processo finalizado ({return_code})")
+        self._manual_log(
+            f"⚠️ streamlink finalizou para {item.text(0)} (código {return_code}) sem gravação válida."
+        )
+        if size == 0 and ts_file:
+            ts_file.unlink(missing_ok=True)
+        logger.warning(
+            "Processo manual finalizado inesperadamente para %s (retorno=%s, bytes=%s)",
+            item.text(0),
+            return_code,
+            size,
+        )
+        self.recorder.finish_manual(iid)
+        for d in (self.manual_last_size, self.manual_inact):
+            d.pop(iid, None)
+
+    def _handle_auto_process_stop(self, ch, cid, return_code):
+        ts_file = self.recorder.ats.get(cid)
+        size = ts_file.stat().st_size if ts_file and ts_file.exists() else 0
+        ch.setText(4, "offline (aguardando)")
+        ch.setText(5, f"Processo finalizado ({return_code})")
+        self._mon_log(
+            f"⚠️ streamlink finalizou para {ch.text(2)} (código {return_code}) sem gravação válida."
+        )
+        if size == 0 and ts_file:
+            ts_file.unlink(missing_ok=True)
+        logger.warning(
+            "Processo automático finalizado inesperadamente para %s (retorno=%s, bytes=%s)",
+            ch.text(2),
+            return_code,
+            size,
+        )
+        self.recorder.finish_auto(cid)
+        for d in (self.auto_last_size, self.auto_inact):
+            d.pop(cid, None)
 
     def _dispatch_live_checks(self):
         for ch in self._iter_mon():
