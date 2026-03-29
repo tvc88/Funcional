@@ -1,7 +1,9 @@
 import subprocess
 import time
+import shutil
 from datetime import datetime
 from pathlib import Path
+from collections import deque
 from concurrent.futures import ProcessPoolExecutor
 from typing import Callable
 
@@ -19,38 +21,59 @@ class Recorder:
         self.astart = {}
         self.ats = {}
 
+    def _tail_log(self, log_path: Path, max_lines: int = 10) -> str:
+        if not log_path.exists():
+            return ""
+        lines = deque(maxlen=max_lines)
+        with log_path.open("r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                lines.append(line.rstrip())
+        return "\n".join(lines)
+
+    def _ensure_streamlink_available(self):
+        if shutil.which("streamlink") is None:
+            raise RuntimeError(
+                "streamlink não foi encontrado no PATH. Instale o streamlink e reinicie o programa."
+            )
+
     def _start_streamlink_with_fallback(self, url: str, qual: str, ts: Path):
         """Inicia o streamlink e tenta fallback para 'best' quando necessário."""
+        self._ensure_streamlink_available()
         qualities = [qual]
         if qual != "best":
             qualities.append("best")
 
         last_return_code = None
         last_quality = qual
+        log_path = ts.with_suffix(".streamlink.log")
         for q in qualities:
+            log_file = log_path.open("a", encoding="utf-8")
             p = subprocess.Popen(
                 ["streamlink", url, q, "-o", str(ts), "--retry-streams", "5"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=log_file,
+                stderr=log_file,
             )
 
             # aguarda brevemente para checar falha imediata do streamlink
             try:
                 p.wait(timeout=1)
             except subprocess.TimeoutExpired:
+                log_file.close()
                 return p, q
+
+            log_file.close()
 
             if p.poll() is None:
-                return p, q
-
-            if p.returncode == 0:
                 return p, q
 
             last_return_code = p.returncode
             last_quality = q
 
+        details = self._tail_log(log_path)
+        if details:
+            details = f"\nDetalhes streamlink (últimas linhas):\n{details}"
         raise RuntimeError(
-            f"streamlink encerrou com código {last_return_code} ao iniciar (qualidade: {last_quality})"
+            f"streamlink encerrou com código {last_return_code} ao iniciar (qualidade: {last_quality}){details}"
         )
 
     # Manual recording
@@ -96,22 +119,6 @@ class Recorder:
         subdir.mkdir(parents=True, exist_ok=True)
         ts = subdir / f"{datetime.now():%d%m%y_%H%M}.ts"
         p, _used_quality = self._start_streamlink_with_fallback(url, qual, ts)
-        p = subprocess.Popen(
-            ["streamlink", url, qual, "-o", str(ts), "--retry-streams", "5"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-
-        # aguarda brevemente para checar falha imediata do streamlink
-        try:
-            p.wait(timeout=1)
-        except subprocess.TimeoutExpired:
-            pass
-
-        if p.poll() is not None and p.returncode != 0:
-            raise RuntimeError(
-                f"streamlink encerrou com código {p.returncode} ao iniciar"
-            )
 
         self.aproc[key] = p
         self.astart[key] = time.time()

@@ -5,6 +5,7 @@
 # ------------------------------------------------------------------
 
 import sys, json, time, subprocess, queue, webbrowser, os, logging, uuid
+import shutil
 from datetime import datetime
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
@@ -87,6 +88,7 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self._load_monitored()
+        self._startup_diagnostics()
 
         self.t_stats = QTimer(self); self.t_stats.timeout.connect(self._update_stats)
         self.t_stats.start(POLL_STATS * 1000)
@@ -317,6 +319,31 @@ class MainWindow(QMainWindow):
             ch.setText(6, "-")
         self._save_monitored()
         self._mon_log("Histórico resetado por solicitação do usuário.")
+
+    def _startup_diagnostics(self):
+        streamlink_path = shutil.which("streamlink")
+        ffmpeg_path = shutil.which("ffmpeg")
+        ffprobe_path = shutil.which("ffprobe")
+
+        if streamlink_path:
+            self._manual_log(f"✅ streamlink encontrado: {streamlink_path}")
+            self._mon_log(f"✅ streamlink encontrado: {streamlink_path}")
+        else:
+            msg = "❌ streamlink não encontrado no PATH. A gravação não vai iniciar."
+            self._manual_log(msg)
+            self._mon_log(msg)
+            logger.error(msg)
+
+        if ffmpeg_path and ffprobe_path:
+            self._manual_log(f"✅ ffmpeg/ffprobe encontrados: {ffmpeg_path}")
+            self._mon_log(f"✅ ffmpeg/ffprobe encontrados: {ffmpeg_path}")
+        else:
+            msg = (
+                "⚠️ ffmpeg/ffprobe ausentes no PATH. O .ts pode ser gravado, mas a conversão para .mp4 vai falhar."
+            )
+            self._manual_log(msg)
+            self._mon_log(msg)
+            logger.warning(msg)
 
     # ---------------- Função de renumeração ---------------------------
     def _renumerar_mon_tree(self):

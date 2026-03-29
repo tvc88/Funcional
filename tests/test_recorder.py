@@ -1,4 +1,7 @@
-from pathlib import Path
+import os
+import stat
+import textwrap
+import time
 
 import pytest
 
@@ -79,3 +82,63 @@ def test_start_streamlink_erro_quando_todas_qualidades_falham(monkeypatch, tmp_p
     with pytest.raises(RuntimeError):
         rec._start_streamlink_with_fallback("https://x", "720p", tmp_path / "a.ts")
 
+
+def test_start_streamlink_saida_imediata_codigo_zero_tambem_falha(monkeypatch, tmp_path):
+    rec = Recorder()
+    _patch_timeout_expired(monkeypatch)
+    calls = []
+
+    def fake_popen(args, stdout=None, stderr=None):
+        calls.append(args[2])
+        return _Proc(returncode=0, timeout=False)
+
+    import subprocess
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    with pytest.raises(RuntimeError):
+        rec._start_streamlink_with_fallback("https://x", "720p", tmp_path / "a.ts")
+    assert calls == ["720p", "best"]
+
+
+def test_start_manual_grava_ts_com_streamlink_fake(tmp_path, monkeypatch):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_streamlink = fake_bin / "streamlink"
+    fake_streamlink.write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env python3
+            import pathlib, sys, time
+            out = None
+            for i, arg in enumerate(sys.argv):
+                if arg == "-o" and i + 1 < len(sys.argv):
+                    out = pathlib.Path(sys.argv[i + 1])
+                    break
+            if out is None:
+                sys.exit(2)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(b"TS-DATA")
+            time.sleep(2.5)
+            """
+        ),
+        encoding="utf-8",
+    )
+    fake_streamlink.chmod(fake_streamlink.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", f"{fake_bin}:{os.environ.get('PATH', '')}")
+
+    rec = Recorder()
+    ts_file = rec.start_manual("k1", "Teste", "https://canal.exemplo/live", "best", tmp_path)
+    time.sleep(0.2)
+    assert ts_file.exists()
+    assert ts_file.stat().st_size > 0
+
+    proc = rec.proc["k1"]
+    proc.terminate()
+    proc.wait(timeout=5)
+
+
+def test_erro_quando_streamlink_nao_existe(monkeypatch, tmp_path):
+    rec = Recorder()
+    monkeypatch.setenv("PATH", "")
+    with pytest.raises(RuntimeError, match="streamlink não foi encontrado"):
+        rec._start_streamlink_with_fallback("https://x", "best", tmp_path / "a.ts")
