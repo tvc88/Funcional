@@ -81,6 +81,18 @@ class Recorder:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
+
+        # aguarda brevemente para checar falha imediata do streamlink
+        try:
+            p.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            pass
+
+        if p.poll() is not None and p.returncode != 0:
+            raise RuntimeError(
+                f"streamlink encerrou com código {p.returncode} ao iniciar"
+            )
+
         self.aproc[key] = p
         self.astart[key] = time.time()
         self.ats[key] = ts
