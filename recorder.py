@@ -96,6 +96,22 @@ class Recorder:
         subdir.mkdir(parents=True, exist_ok=True)
         ts = subdir / f"{datetime.now():%d%m%y_%H%M}.ts"
         p, _used_quality = self._start_streamlink_with_fallback(url, qual, ts)
+        p = subprocess.Popen(
+            ["streamlink", url, qual, "-o", str(ts), "--retry-streams", "5"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        # aguarda brevemente para checar falha imediata do streamlink
+        try:
+            p.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            pass
+
+        if p.poll() is not None and p.returncode != 0:
+            raise RuntimeError(
+                f"streamlink encerrou com código {p.returncode} ao iniciar"
+            )
 
         self.aproc[key] = p
         self.astart[key] = time.time()
